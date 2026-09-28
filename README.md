@@ -31,7 +31,7 @@ De rechten worden in de database zelf afgedwongen (Postgres Row Level Security),
 
 Next.js 15 (App Router) · Supabase (Postgres, login, opslag – regio Frankfurt) · Claude via Google Vertex AI EU (samenvatten, agenda,
 analyse) · AssemblyAI EU (spraak → tekst, met sprekerherkenning) · Exchange Web Services (mail + agenda op eigen server; Microsoft Graph als optie voor Microsoft 365) ·
-Vercel (hosting + cron-jobs).
+Vercel (hosting + cron-jobs, regio Frankfurt `fra1`).
 
 ## Installatie (eenmalig, ±45 minuten)
 
