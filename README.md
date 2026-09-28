@@ -29,7 +29,7 @@ De rechten worden in de database zelf afgedwongen (Postgres Row Level Security),
 
 ## Techniek
 
-Next.js 15 (App Router) · Supabase (Postgres, login, opslag – regio Frankfurt) · Claude (samenvatten, agenda,
+Next.js 15 (App Router) · Supabase (Postgres, login, opslag – regio Frankfurt) · Claude via Google Vertex AI EU (samenvatten, agenda,
 analyse) · AssemblyAI EU (spraak → tekst, met sprekerherkenning) · Exchange Web Services (mail + agenda op eigen server; Microsoft Graph als optie voor Microsoft 365) ·
 Vercel (hosting + cron-jobs).
 
@@ -45,8 +45,21 @@ Vercel (hosting + cron-jobs).
 6. Maak jezelf aan: **Authentication → Users → Add user → Send invitation** met jouw e-mailadres.
    De eerste gebruiker wordt automatisch beheerder en kernteam.
 
-### 2. Claude API
-console.anthropic.com → API Keys → nieuwe key.
+### 2. Claude (via Google Cloud, in de EU)
+Claude loopt via **Google Vertex AI** in de EU-regio, zodat ook de AI-verwerking in de EU blijft.
+Let op: een Google Workspace-account is nog geen Google Cloud-project – dat maak je eenmalig aan.
+1. console.cloud.google.com → nieuw **project** aanmaken (bv. `projekt-assistent`) en een **factuuraccount** koppelen.
+2. **APIs & Services** → *Vertex AI API* inschakelen.
+3. **Vertex AI → Model Garden** → Claude Opus 5 zoeken → **Enable** (voorwaarden van Anthropic accepteren).
+   Controleer of het model in de EU-regio beschikbaar is; is het er nog niet, kies dan tijdelijk een ouder model
+   (`MODEL` in `src/lib/ai/claude.ts`).
+4. **IAM → Service Accounts** → nieuw serviceaccount met rol **Vertex AI User** → *Keys* → *Add key* → JSON.
+5. Zet in de omgevingsvariabelen: `VERTEX_PROJECT_ID` (project-ID), `VERTEX_REGION=eu` en
+   `GOOGLE_SERVICE_ACCOUNT_JSON` (de inhoud van het JSON-bestand). Gebruik nooit de regio `global`: dan kan de
+   verwerking buiten de EU plaatsvinden.
+
+Alternatief zonder Google Cloud: console.anthropic.com → API Keys → `ANTHROPIC_API_KEY`. Dan is niet gegarandeerd
+dat de verwerking in de EU gebeurt.
 
 ### 3. AssemblyAI (transcriptie)
 assemblyai.com → account → API key. De app gebruikt de EU-server (`api.eu.assemblyai.com`).
@@ -96,7 +109,7 @@ npm run dev
 
 ## Privacy (DSGVO)
 - Opnemen kan pas na bevestiging dat alle deelnemers akkoord zijn.
-- Data staat in de EU (Supabase Frankfurt, AssemblyAI EU). Sluit met Supabase, Vercel, Anthropic en AssemblyAI
-  een verwerkersovereenkomst (AVV/DPA) af – die bieden ze standaard aan.
+- Data staat in de EU (Supabase Frankfurt, AssemblyAI EU, Claude via Google Vertex AI in de EU-regio). Sluit met
+  Supabase, Vercel, Google Cloud en AssemblyAI een verwerkersovereenkomst (AVV/DPA) af – die bieden ze standaard aan.
 - Exchange-wachtwoorden staan versleuteld (AES-256) in de database en zijn alleen server-side leesbaar.
 - Mail buiten de gekoppelde mappen wordt nooit opgehaald.

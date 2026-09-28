@@ -1,12 +1,38 @@
 import "server-only";
-import Anthropic from "@anthropic-ai/sdk";
+import Anthropic, { betaRefusalFallbackMiddleware } from "@anthropic-ai/sdk";
 import { betaZodOutputFormat } from "@anthropic-ai/sdk/helpers/beta/zod";
+import { AnthropicVertex } from "@anthropic-ai/vertex-sdk";
+import { GoogleAuth } from "google-auth-library";
 import { z } from "zod";
 import type { Lang } from "@/lib/types";
 
 const MODEL = "claude-opus-5";
+const FALLBACK_MODEL = "claude-opus-4-8";
 
-const client = new Anthropic();
+/**
+ * Met VERTEX_PROJECT_ID loopt Claude via Google Vertex AI, standaard in de EU-regio
+ * (VERTEX_REGION, bv. "eu" of "europe-west1"; nooit "global" als de data in de EU moet blijven).
+ * Zonder VERTEX_PROJECT_ID wordt de API van Anthropic zelf gebruikt (ANTHROPIC_API_KEY).
+ */
+const useVertex = !!process.env.VERTEX_PROJECT_ID;
+
+function createClient() {
+  if (!useVertex) return new Anthropic();
+  const key = process.env.GOOGLE_SERVICE_ACCOUNT_JSON;
+  return new AnthropicVertex({
+    projectId: process.env.VERTEX_PROJECT_ID,
+    region: process.env.VERTEX_REGION || "eu",
+    googleAuth: new GoogleAuth({
+      scopes: "https://www.googleapis.com/auth/cloud-platform",
+      // Op Vercel is er geen gcloud-login: de sleutel van het serviceaccount staat in een omgevingsvariabele.
+      ...(key ? { credentials: JSON.parse(key) } : {}),
+    }),
+    // Vertex kent geen server-side fallbacks; de SDK doet het hier aan de kant van de client.
+    middleware: [betaRefusalFallbackMiddleware([{ model: FALLBACK_MODEL }])],
+  });
+}
+
+const client = createClient();
 
 const LANG_NAME: Record<Lang, string> = { nl: "Nederlands", de: "Deutsch" };
 
@@ -17,8 +43,8 @@ bedragen of datums die niet in het materiaal staan. Als iets onduidelijk is, zeg
 
 /**
  * Eén Claude-aanroep met gestructureerde (JSON-)uitvoer, gevalideerd met zod.
- * Bij een weigering door de veiligheidsfilters schakelt de API zelf over op een
- * reservemodel (fallbacks: "default").
+ * Bij een weigering door de veiligheidsfilters wordt overgeschakeld op een reservemodel:
+ * bij Anthropic door de API zelf (fallbacks: "default"), bij Vertex door de middleware hierboven.
  */
 async function structured<T extends z.ZodType>(opts: {
   schema: T;
@@ -31,8 +57,7 @@ async function structured<T extends z.ZodType>(opts: {
     model: MODEL,
     max_tokens: opts.maxTokens ?? 16000,
     thinking: { type: "adaptive" },
-    betas: ["server-side-fallback-2026-07-01"],
-    fallbacks: "default",
+    ...(useVertex ? {} : { betas: ["server-side-fallback-2026-07-01"], fallbacks: "default" as const }),
     system: `${BASE_SYSTEM}\n\n${opts.system}`,
     messages: [{ role: "user", content: opts.prompt }],
     output_config: {
