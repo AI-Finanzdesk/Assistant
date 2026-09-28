@@ -4,3 +4,8 @@ node_modules
 .env.local
 *.tsbuildinfo
 next-env.d.ts
+
+# GB10-test: echte mails, opnames en resultaten blijven lokaal
+gb10-test/data/
+gb10-test/results/
+gb10-test/.env

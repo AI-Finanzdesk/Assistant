@@ -7,7 +7,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "gb10-test": "tsx --conditions=react-server gb10-test/run-test.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.128.0",
@@ -24,9 +25,12 @@
     "zod": "^4.6.5"
   },
   "devDependencies": {
+    "@types/mailparser": "^3.4.6",
     "@types/node": "^22.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
+    "mailparser": "^3.9.31",
+    "tsx": "^4.23.15",
     "typescript": "^5.6.0"
   }
 }

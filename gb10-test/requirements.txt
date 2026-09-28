@@ -1,0 +1,5 @@
+# Bij voorkeur in de PyTorch-container van NVIDIA installeren (zie README.md): daarin zit
+# torch al met CUDA-ondersteuning voor de GB10 (ARM). Installeer torch dus NIET opnieuw via pip.
+transformers>=4.44
+accelerate
+pyannote.audio>=3.1

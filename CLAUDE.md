@@ -1,6 +1,8 @@
 # Projekt-Assistent – notities voor verdere ontwikkeling
 
 - Next.js 15 App Router + Supabase (RLS!) + Claude (`src/lib/ai/claude.ts`) + AssemblyAI.
+- AI-taken (prompt + zod-schema) staan los van het model in `src/lib/ai/tasks.ts`; `claude.ts` voert ze uit met
+  Claude, `local.ts` met een eigen model (Ollama/vLLM op de GB10). Test van de lokale modellen: `gb10-test/`.
 - Mail/agenda via `src/lib/mail/provider.ts`: Exchange on-premise (EWS, `src/lib/mail/ews.ts`) of Microsoft 365
   (Graph, `src/lib/microsoft/graph.ts`). Nieuwe mail-/agendafuncties altijd aan de `MailProvider`-interface toevoegen.
 - Rechten staan in `supabase/migrations/*.sql` (RLS-policies en hulpfuncties `is_internal`, `project_role`,
