@@ -1,10 +1,10 @@
 import "server-only";
-import { createTaskEvent, getAccessToken } from "@/lib/microsoft/graph";
+import { getMailProvider } from "@/lib/mail/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Task } from "@/lib/types";
 
 /**
- * Zet een taak in de Outlook-agenda van de toegewezen persoon – maar alleen als
+ * Zet een taak in de Outlook-agenda (Exchange of Microsoft 365) van de toegewezen persoon – maar alleen als
  * die persoon agenda-sync aan heeft staan (profiel) én dat voor dit project wil
  * (project_members.calendar_tasks).
  */
@@ -30,10 +30,10 @@ export async function syncTaskToCalendar(taskId: string): Promise<"synced" | "sk
     if (member && !member.calendar_tasks) return "skipped";
   }
 
-  const token = await getAccessToken(task.assignee_id);
-  if (!token) return "skipped";
+  const provider = await getMailProvider(task.assignee_id);
+  if (!provider) return "skipped";
 
-  const eventId = await createTaskEvent(token, {
+  const eventId = await provider.createTaskEvent({
     title: task.title,
     description: task.description,
     due_date: task.due_date,

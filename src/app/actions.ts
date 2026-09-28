@@ -2,7 +2,9 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
-import { createMeetingEvent, getAccessToken } from "@/lib/microsoft/graph";
+import { encryptSecret } from "@/lib/crypto";
+import { testEws } from "@/lib/mail/ews";
+import { getMailProvider } from "@/lib/mail/provider";
 import { prepareAgenda, runAssistantForUser } from "@/lib/services/assistant";
 import { syncTaskToCalendar } from "@/lib/services/calendar";
 import { syncMailForUser } from "@/lib/services/mail";
@@ -286,8 +288,8 @@ export async function confirmMeetingTasks(meetingId: string) {
 export async function meetingToCalendar(meetingId: string) {
   const { supabase, user, profile } = await assertCanEdit(meetingId);
   if (!profile.calendar_sync_enabled) throw new Error("Agenda-sync staat uit in je instellingen");
-  const token = await getAccessToken(user.id);
-  if (!token) throw new Error("Geen Microsoft-account gekoppeld");
+  const provider = await getMailProvider(user.id);
+  if (!provider) throw new Error("Geen Exchange-account gekoppeld");
 
   const [{ data: meeting }, { data: content }, { data: participants }] = await Promise.all([
     supabase.from("meetings").select("*").eq("id", meetingId).single(),
@@ -301,7 +303,7 @@ export async function meetingToCalendar(meetingId: string) {
     .map((p) => (p.profiles as unknown as { email: string } | null)?.email)
     .filter((e): e is string => Boolean(e));
 
-  const eventId = await createMeetingEvent(token, {
+  const eventId = await provider.createMeetingEvent({
     title: meeting.title,
     start: meeting.scheduled_at,
     agenda: content?.agenda_md ?? null,
@@ -415,10 +417,50 @@ export async function updateProfile(form: FormData) {
   revalidatePath("/", "layout");
 }
 
-export async function disconnectMicrosoft() {
+export async function disconnectMail() {
   const { user } = await requireUser();
-  await createAdminClient().from("ms_connections").delete().eq("user_id", user.id);
+  const admin = createAdminClient();
+  await Promise.all([
+    admin.from("exchange_connections").delete().eq("user_id", user.id),
+    admin.from("ms_connections").delete().eq("user_id", user.id),
+    // Map-ID's horen bij het oude account.
+    admin.from("mail_folder_links").delete().eq("user_id", user.id),
+  ]);
   revalidatePath("/settings");
+}
+
+export type ConnectState = { ok: boolean; message: string } | null;
+
+/** Exchange op eigen server koppelen: eerst testen, dan versleuteld opslaan. */
+export async function connectExchange(_prev: ConnectState, form: FormData): Promise<ConnectState> {
+  const { user } = await requireUser();
+  // Vast serveradres uit de omgeving heeft voorrang (voorkomt dat de server willekeurige adressen aanroept).
+  const url = process.env.EWS_URL || str(form, "ews_url");
+  const username = str(form, "username");
+  const password = typeof form.get("password") === "string" ? (form.get("password") as string) : "";
+  const accountEmail = str(form, "account_email");
+  const authType = str(form, "auth_type") === "basic" ? "basic" : "ntlm";
+  if (!url || !username || !password || !accountEmail) return { ok: false, message: "Alle velden invullen" };
+  if (!/^https:\/\//i.test(url)) return { ok: false, message: "Het EWS-adres moet met https:// beginnen" };
+
+  try {
+    const count = await testEws({ url, username, password, authType, accountEmail });
+    const admin = createAdminClient();
+    const { error } = await admin.from("exchange_connections").upsert({
+      user_id: user.id,
+      ews_url: url,
+      username,
+      account_email: accountEmail,
+      auth_type: authType,
+      password_enc: encryptSecret(password),
+      updated_at: new Date().toISOString(),
+    });
+    check(error);
+    revalidatePath("/settings");
+    return { ok: true, message: `✅ ${count}` };
+  } catch (e) {
+    return { ok: false, message: e instanceof Error ? e.message : String(e) };
+  }
 }
 
 export async function linkFolder(form: FormData) {
@@ -430,8 +472,8 @@ export async function linkFolder(form: FormData) {
   check(
     (
       await supabase.from("mail_folder_links").upsert(
-        { user_id: user.id, graph_folder_id: folderId, folder_name: nameParts.join("|"), project_id: projectId, delta_link: null },
-        { onConflict: "user_id,graph_folder_id" },
+        { user_id: user.id, folder_id: folderId, folder_name: nameParts.join("|"), project_id: projectId, sync_state: null },
+        { onConflict: "user_id,folder_id" },
       )
     ).error,
   );

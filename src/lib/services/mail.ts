@@ -1,6 +1,6 @@
 import "server-only";
 import { digestEmails } from "@/lib/ai/claude";
-import { fetchFolderDelta, getAccessToken } from "@/lib/microsoft/graph";
+import { getMailProvider } from "@/lib/mail/provider";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Lang } from "@/lib/types";
 
@@ -17,12 +17,12 @@ export async function syncMailForUser(userId: string) {
     .single();
   if (!profile?.mail_sync_enabled) return { imported: 0 };
 
-  const token = await getAccessToken(userId);
-  if (!token) return { imported: 0 };
+  const provider = await getMailProvider(userId);
+  if (!provider) return { imported: 0 };
 
   const { data: links } = await admin
     .from("mail_folder_links")
-    .select("id, graph_folder_id, project_id, delta_link, projects(name)")
+    .select("id, folder_id, project_id, sync_state, projects(name)")
     .eq("user_id", userId);
 
   const { data: topics } = await admin.from("knowledge_topics").select("id, title");
@@ -30,26 +30,26 @@ export async function syncMailForUser(userId: string) {
 
   let imported = 0;
   for (const link of links ?? []) {
-    const { messages, deltaLink } = await fetchFolderDelta(token, link.graph_folder_id, link.delta_link);
+    const { messages, syncState } = await provider.syncFolder(link.folder_id, link.sync_state);
 
     const rows = messages.map((m) => ({
       owner_id: userId,
       project_id: link.project_id,
-      graph_message_id: m.id,
+      external_id: m.id,
       subject: m.subject,
-      from_name: m.from?.emailAddress.name ?? null,
-      from_address: m.from?.emailAddress.address ?? null,
-      to_addresses: (m.toRecipients ?? []).map((r) => r.emailAddress.address),
-      received_at: m.receivedDateTime,
-      body_preview: m.bodyPreview,
-      body_text: m.body?.content ?? null,
+      from_name: m.fromName,
+      from_address: m.fromAddress,
+      to_addresses: m.to,
+      received_at: m.receivedAt,
+      body_preview: m.preview,
+      body_text: m.bodyText,
       web_link: m.webLink,
     }));
 
     if (rows.length) {
       const { data: inserted } = await admin
         .from("emails")
-        .upsert(rows, { onConflict: "owner_id,graph_message_id", ignoreDuplicates: true })
+        .upsert(rows, { onConflict: "owner_id,external_id", ignoreDuplicates: true })
         .select("id, subject, from_name, from_address, received_at, body_text, body_preview");
 
       const fresh = inserted ?? [];
@@ -90,7 +90,7 @@ export async function syncMailForUser(userId: string) {
 
     await admin
       .from("mail_folder_links")
-      .update({ delta_link: deltaLink ?? link.delta_link, last_synced_at: new Date().toISOString() })
+      .update({ sync_state: syncState ?? link.sync_state, last_synced_at: new Date().toISOString() })
       .eq("id", link.id);
   }
   return { imported };

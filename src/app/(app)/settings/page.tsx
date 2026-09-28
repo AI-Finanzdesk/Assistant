@@ -1,5 +1,5 @@
 import {
-  disconnectMicrosoft,
+  disconnectMail,
   inviteUser,
   linkFolder,
   syncMailNow,
@@ -7,11 +7,13 @@ import {
   updateProfile,
   updateUserFlags,
 } from "@/app/actions";
+import { ExchangeConnectForm } from "@/components/ExchangeConnectForm";
 import { SubmitButton } from "@/components/SubmitButton";
 import { dict, formatDate } from "@/lib/i18n";
-import { getAccessToken, listMailFolders, msConfigured, type MailFolder } from "@/lib/microsoft/graph";
+import { getConnectionInfo, getMailProvider } from "@/lib/mail/provider";
+import type { MailFolder } from "@/lib/mail/types";
+import { msConfigured } from "@/lib/microsoft/graph";
 import { requireUser } from "@/lib/session";
-import { createAdminClient } from "@/lib/supabase/admin";
 import type { Profile } from "@/lib/types";
 
 export default async function SettingsPage({ searchParams }: { searchParams: Promise<{ ms?: string }> }) {
@@ -19,19 +21,14 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
   const { supabase, user, profile } = await requireUser();
   const t = dict(profile.language);
 
-  const admin = createAdminClient();
-  const { data: connection } = await admin
-    .from("ms_connections")
-    .select("account_email")
-    .eq("user_id", user.id)
-    .maybeSingle();
+  const connection = await getConnectionInfo(user.id);
 
   let folders: MailFolder[] = [];
   let folderError: string | null = null;
   if (connection && profile.mail_sync_enabled) {
     try {
-      const token = await getAccessToken(user.id);
-      if (token) folders = await listMailFolders(token);
+      const provider = await getMailProvider(user.id);
+      if (provider) folders = await provider.listFolders();
     } catch (e) {
       folderError = e instanceof Error ? e.message : String(e);
     }
@@ -79,21 +76,39 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
         <section className="card stack">
           <h2>{t.settings_mail}</h2>
           {ms === "error" && <p className="error">Microsoft ✕</p>}
-          {!msConfigured() ? (
-            <p className="muted">{t.settings_ms_not_configured}</p>
-          ) : connection ? (
+          {connection ? (
             <div className="row between">
               <span>
-                ✅ {t.settings_connected_as} <strong>{connection.account_email}</strong>
+                ✅ {t.settings_connected_as} <strong>{connection.accountEmail}</strong>
+                {connection.url && <span className="small muted"> · {connection.url}</span>}
               </span>
-              <form action={disconnectMicrosoft}>
+              <form action={disconnectMail}>
                 <SubmitButton className="small ghost">{t.settings_disconnect}</SubmitButton>
               </form>
             </div>
           ) : (
-            <a className="button" href="/api/microsoft/connect">
-              {t.settings_connect_ms}
-            </a>
+            <>
+              <ExchangeConnectForm
+                fixedUrl={process.env.EWS_URL || null}
+                defaultEmail={profile.email}
+                labels={{
+                  title: t.ews_title,
+                  hint: t.ews_hint,
+                  url: t.ews_url,
+                  username: t.ews_username,
+                  password: t.ews_password,
+                  email: t.ews_email,
+                  auth: t.ews_auth,
+                  connect: t.ews_connect,
+                  connected: t.ews_connected,
+                }}
+              />
+              {msConfigured() && (
+                <a className="button secondary" href="/api/microsoft/connect">
+                  {t.ms365_alternative}
+                </a>
+              )}
+            </>
           )}
 
           {connection && profile.mail_sync_enabled && (
@@ -117,7 +132,7 @@ export default async function SettingsPage({ searchParams }: { searchParams: Pro
               <form action={linkFolder} className="row">
                 <select name="folder" style={{ flex: 2, minWidth: 200 }}>
                   {folders
-                    .filter((f) => !(links ?? []).some((l) => l.graph_folder_id === f.id))
+                    .filter((f) => !(links ?? []).some((l) => l.folder_id === f.id))
                     .map((f) => (
                       <option key={f.id} value={`${f.id}|${f.path}`}>
                         {f.path}

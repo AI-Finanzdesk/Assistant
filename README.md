@@ -30,14 +30,14 @@ De rechten worden in de database zelf afgedwongen (Postgres Row Level Security),
 ## Techniek
 
 Next.js 15 (App Router) · Supabase (Postgres, login, opslag – regio Frankfurt) · Claude (samenvatten, agenda,
-analyse) · AssemblyAI EU (spraak → tekst, met sprekerherkenning) · Microsoft Graph (Exchange Online mail + agenda) ·
+analyse) · AssemblyAI EU (spraak → tekst, met sprekerherkenning) · Exchange Web Services (mail + agenda op eigen server; Microsoft Graph als optie voor Microsoft 365) ·
 Vercel (hosting + cron-jobs).
 
 ## Installatie (eenmalig, ±45 minuten)
 
 ### 1. Supabase
 1. Maak een account op supabase.com → **New project**, regio **Central EU (Frankfurt)**.
-2. **SQL Editor** → plak de inhoud van `supabase/migrations/0001_init.sql` → **Run**.
+2. **SQL Editor** → voer na elkaar de bestanden uit `supabase/migrations/` uit (`0001_…`, dan `0002_…`) → **Run**.
 3. **Authentication → Sign In / Providers**: zet **"Allow new users to sign up" uit** (alleen uitnodigingen).
 4. **Authentication → URL Configuration**: Site URL = je app-URL (bv. `https://assistent.vercel.app`),
    en voeg `https://assistent.vercel.app/**` toe bij Redirect URLs.
@@ -51,17 +51,26 @@ console.anthropic.com → API Keys → nieuwe key.
 ### 3. AssemblyAI (transcriptie)
 assemblyai.com → account → API key. De app gebruikt de EU-server (`api.eu.assemblyai.com`).
 
-### 4. Microsoft 365 (Exchange Online)
-1. entra.microsoft.com → **App registrations → New registration**
-   - Naam: Projekt-Assistent
-   - Supported account types: *Accounts in this organizational directory only*
-   - Redirect URI (Web): `https://<jouw-app>/api/microsoft/callback`
-2. **Certificates & secrets → New client secret** → waarde noteren.
-3. **API permissions → Microsoft Graph → Delegated**: `offline_access`, `User.Read`, `Mail.Read`,
-   `Calendars.ReadWrite` → **Grant admin consent**.
-4. Noteer **Application (client) ID** en **Directory (tenant) ID**.
+### 4. Exchange-server (on-premise)
+De app praat via **EWS (Exchange Web Services)** met jullie server – dezelfde techniek die Outlook voor Mac en
+veel mobiele apps gebruiken. Daarmee werken zowel de mailmappen als de agenda. Ondersteund: Exchange 2010 SP2 en
+nieuwer (2013/2016/2019/Subscription Edition), met NTLM- of Basic-aanmelding.
 
-> Draait jullie Exchange nog on-premise (niet Microsoft 365)? Laat het weten, dan komt er een EWS/IMAP-koppeling.
+Vraag aan jullie IT-beheerder:
+1. **Het EWS-adres**, meestal `https://mail.<jullie-domein>/EWS/Exchange.asmx`.
+   Test: open dat adres in de browser → er moet een inlogvenster verschijnen.
+2. **Is het vanaf internet bereikbaar?** De app draait in de cloud (Vercel), dus EWS moet net als
+   Outlook Web Access (OWA) van buitenaf bereikbaar zijn, met een geldig certificaat (bv. Let's Encrypt).
+   Staat er een firewall met IP-filter voor, dan heeft Vercel géén vaste IP-adressen – laat het weten, dan
+   kiezen we een alternatief (kleine sync-dienst op jullie eigen netwerk die de mail doorstuurt).
+3. **Aanmelding**: meestal NTLM (standaard). Als NTLM geblokkeerd is: Basic via HTTPS.
+
+Zet het adres als `EWS_URL` in de omgevingsvariabelen; dan hoeven gebruikers alleen nog hun gebruikersnaam en
+wachtwoord in te vullen. Maak ook een `CREDENTIALS_KEY` aan (`openssl rand -hex 32`): daarmee worden de
+Exchange-wachtwoorden versleuteld opgeslagen.
+
+> Stappen jullie later over naar Microsoft 365? Dan zit die koppeling er al in (Microsoft Graph, zie `.env.example`
+> onder `MS_CLIENT_ID`). Per gebruiker kan gekozen worden.
 
 ### 5. Vercel
 1. vercel.com → **Add New Project** → deze repository, **Root Directory: `projekt-assistent`**.
@@ -72,7 +81,7 @@ assemblyai.com → account → API key. De app gebruikt de EU-server (`api.eu.as
    op `*/30 * * * *` zetten (elke 30 minuten). Tussendoor kan altijd: Instellingen → *Nu synchroniseren*.
 
 ### 6. In de app
-1. Inloggen → **Instellingen**: naam, taal, mail-/agenda-sync aan → **Koppel Microsoft-account**.
+1. Inloggen → **Instellingen**: naam, taal, mail-/agenda-sync aan → Exchange-gebruikersnaam en wachtwoord invullen → **Testen & koppelen**.
 2. Mailmappen aan projecten koppelen.
 3. Michael en Timo uitnodigen (Instellingen → Gebruikers). Michael: vinkje *Kernteam*. Timo: zonder.
 4. Bij het project: Timo toevoegen als **Gast**.
@@ -89,4 +98,5 @@ npm run dev
 - Opnemen kan pas na bevestiging dat alle deelnemers akkoord zijn.
 - Data staat in de EU (Supabase Frankfurt, AssemblyAI EU). Sluit met Supabase, Vercel, Anthropic en AssemblyAI
   een verwerkersovereenkomst (AVV/DPA) af – die bieden ze standaard aan.
-- Microsoft-tokens zijn alleen server-side leesbaar; mail buiten de gekoppelde mappen wordt nooit opgehaald.
+- Exchange-wachtwoorden staan versleuteld (AES-256) in de database en zijn alleen server-side leesbaar.
+- Mail buiten de gekoppelde mappen wordt nooit opgehaald.

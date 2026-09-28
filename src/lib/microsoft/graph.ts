@@ -1,4 +1,15 @@
 import "server-only";
+import {
+  FIRST_SYNC_DAYS,
+  escapeHtml,
+  nextDay,
+  taskDay,
+  type MailFolder,
+  type MailMessage,
+  type MailProvider,
+  type MeetingEventInput,
+  type TaskEventInput,
+} from "@/lib/mail/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -113,11 +124,6 @@ async function graph<T>(token: string, url: string, init?: RequestInit): Promise
 // Mailmappen
 // ─────────────────────────────────────────────────────────────
 
-export interface MailFolder {
-  id: string;
-  path: string;
-}
-
 interface GraphFolder {
   id: string;
   displayName: string;
@@ -125,7 +131,7 @@ interface GraphFolder {
 }
 
 /** Alle mappen (tot 3 niveaus diep) met hun volledige pad, bv. "Inbox / Projekte / Dritz". */
-export async function listMailFolders(token: string): Promise<MailFolder[]> {
+async function listMailFolders(token: string): Promise<MailFolder[]> {
   const result: MailFolder[] = [];
   async function walk(url: string, prefix: string, depth: number) {
     let next: string | undefined = url;
@@ -145,7 +151,7 @@ export async function listMailFolders(token: string): Promise<MailFolder[]> {
   return result.sort((a, b) => a.path.localeCompare(b.path));
 }
 
-export interface GraphMessage {
+interface GraphMessage {
   id: string;
   subject: string | null;
   from?: { emailAddress: { name: string; address: string } };
@@ -157,20 +163,17 @@ export interface GraphMessage {
   "@removed"?: unknown;
 }
 
-/**
- * Nieuwe/gewijzigde berichten in een map sinds de vorige synchronisatie
- * (Graph delta query). Eerste keer: berichten van de afgelopen 90 dagen.
- */
-export async function fetchFolderDelta(
+/** Nieuwe/gewijzigde berichten via Graph delta query. */
+async function syncFolder(
   token: string,
   folderId: string,
   deltaLink: string | null,
-): Promise<{ messages: GraphMessage[]; deltaLink: string | null }> {
-  const since = new Date(Date.now() - 90 * 86400_000).toISOString();
+): Promise<{ messages: MailMessage[]; syncState: string | null }> {
+  const since = new Date(Date.now() - FIRST_SYNC_DAYS * 86400_000).toISOString();
   let url: string | undefined =
     deltaLink ??
     `/me/mailFolders/${folderId}/messages/delta?$select=subject,from,toRecipients,receivedDateTime,bodyPreview,body,webLink&$filter=receivedDateTime ge ${since}`;
-  const messages: GraphMessage[] = [];
+  const messages: MailMessage[] = [];
   let newDelta: string | null = null;
 
   while (url) {
@@ -179,11 +182,24 @@ export async function fetchFolderDelta(
       "@odata.nextLink"?: string;
       "@odata.deltaLink"?: string;
     } = await graph(token, url, { headers: { Prefer: 'outlook.body-content-type="text", odata.maxpagesize=50' } });
-    messages.push(...page.value.filter((m) => !m["@removed"]));
+    for (const m of page.value) {
+      if (m["@removed"]) continue;
+      messages.push({
+        id: m.id,
+        subject: m.subject,
+        fromName: m.from?.emailAddress.name ?? null,
+        fromAddress: m.from?.emailAddress.address ?? null,
+        to: (m.toRecipients ?? []).map((r) => r.emailAddress.address),
+        receivedAt: m.receivedDateTime,
+        preview: m.bodyPreview,
+        bodyText: m.body?.content ?? null,
+        webLink: m.webLink,
+      });
+    }
     url = page["@odata.nextLink"];
     if (page["@odata.deltaLink"]) newDelta = page["@odata.deltaLink"];
   }
-  return { messages, deltaLink: newDelta };
+  return { messages, syncState: newDelta ?? deltaLink };
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -191,13 +207,8 @@ export async function fetchFolderDelta(
 // ─────────────────────────────────────────────────────────────
 
 /** Taak als hele-dag-afspraak op de deadline (of morgen), met herinnering. */
-export async function createTaskEvent(
-  token: string,
-  task: { title: string; description: string | null; due_date: string | null; link: string },
-): Promise<string> {
-  const day = task.due_date ?? new Date(Date.now() + 86400_000).toISOString().slice(0, 10);
-  const end = new Date(`${day}T00:00:00Z`);
-  end.setUTCDate(end.getUTCDate() + 1);
+async function createTaskEvent(token: string, task: TaskEventInput): Promise<string> {
+  const day = taskDay(task.due_date);
   const event = await graph<{ id: string }>(token, "/me/events", {
     method: "POST",
     body: JSON.stringify({
@@ -207,7 +218,7 @@ export async function createTaskEvent(
         content: `${escapeHtml(task.description ?? "")}<br><br><a href="${task.link}">${task.link}</a>`,
       },
       start: { dateTime: `${day}T00:00:00`, timeZone: "Europe/Berlin" },
-      end: { dateTime: `${end.toISOString().slice(0, 10)}T00:00:00`, timeZone: "Europe/Berlin" },
+      end: { dateTime: `${nextDay(day)}T00:00:00`, timeZone: "Europe/Berlin" },
       isAllDay: true,
       showAs: "free",
       isReminderOn: true,
@@ -218,10 +229,7 @@ export async function createTaskEvent(
   return event.id;
 }
 
-export async function createMeetingEvent(
-  token: string,
-  meeting: { title: string; start: string; agenda: string | null; link: string; attendees: string[] },
-): Promise<string> {
+async function createMeetingEvent(token: string, meeting: MeetingEventInput): Promise<string> {
   const start = new Date(meeting.start);
   const end = new Date(start.getTime() + 60 * 60_000);
   const event = await graph<{ id: string }>(token, "/me/events", {
@@ -241,6 +249,13 @@ export async function createMeetingEvent(
   return event.id;
 }
 
-function escapeHtml(s: string) {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+export function graphProvider(token: string, accountEmail: string | null): MailProvider {
+  return {
+    kind: "graph",
+    accountEmail,
+    listFolders: () => listMailFolders(token),
+    syncFolder: (folderId, state) => syncFolder(token, folderId, state),
+    createTaskEvent: (task) => createTaskEvent(token, task),
+    createMeetingEvent: (meeting) => createMeetingEvent(token, meeting),
+  };
 }

@@ -75,7 +75,7 @@ h3 { font-size: 1rem; margin: 0 0 .5rem; }
 
 label { display: block; font-size: .85rem; color: var(--muted); margin-bottom: .2rem; }
 label.check { display: flex; gap: .4rem; align-items: center; color: var(--text); font-size: .9rem; }
-input[type=text], input[type=email], input[type=date], input[type=datetime-local], select, textarea {
+input[type=text], input[type=email], input[type=password], input[type=date], input[type=datetime-local], select, textarea {
   width: 100%; padding: .5rem .6rem; border: 1px solid var(--border); border-radius: 8px;
   background: var(--bg); color: var(--text); font: inherit;
 }

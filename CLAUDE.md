@@ -1,6 +1,8 @@
 # Projekt-Assistent – notities voor verdere ontwikkeling
 
-- Next.js 15 App Router + Supabase (RLS!) + Claude (`src/lib/ai/claude.ts`) + AssemblyAI + Microsoft Graph.
+- Next.js 15 App Router + Supabase (RLS!) + Claude (`src/lib/ai/claude.ts`) + AssemblyAI.
+- Mail/agenda via `src/lib/mail/provider.ts`: Exchange on-premise (EWS, `src/lib/mail/ews.ts`) of Microsoft 365
+  (Graph, `src/lib/microsoft/graph.ts`). Nieuwe mail-/agendafuncties altijd aan de `MailProvider`-interface toevoegen.
 - Rechten staan in `supabase/migrations/*.sql` (RLS-policies en hulpfuncties `is_internal`, `project_role`,
   `can_view_meeting_full`, …). Schemawijzigingen altijd als nieuwe migratie (`0002_….sql`), nooit 0001 aanpassen.
 - Schermen gebruiken de gebruikersclient (`requireUser()` → RLS). De service-role client (`createAdminClient`)
